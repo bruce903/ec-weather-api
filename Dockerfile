@@ -9,6 +9,8 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     libhdf5-dev \
     libnetcdf-dev \
+    build-essential \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
