@@ -211,12 +211,18 @@ def bvlos_assessment():
         lon: Longitude (required)
         max_wind_kts: Maximum wind speed threshold (default: 20)
         max_gust_kts: Maximum gust threshold (default: 25)
+        max_precip_mm: Maximum precipitation threshold (default: 5)
+        min_temp_c: Minimum temperature threshold (default: -25)
+        max_temp_c: Maximum temperature threshold (default: 40)
     """
     try:
         lat = float(request.args.get('lat'))
         lon = float(request.args.get('lon'))
         max_wind = float(request.args.get('max_wind_kts', 20))
         max_gust = float(request.args.get('max_gust_kts', 25))
+        max_precip = float(request.args.get('max_precip_mm', 5))
+        min_temp = float(request.args.get('min_temp_c', -25))
+        max_temp = float(request.args.get('max_temp_c', 40))
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid parameters"}), 400
     
@@ -225,7 +231,13 @@ def bvlos_assessment():
     
     results = {
         "location": {"lat": lat, "lon": lon},
-        "thresholds": {"max_wind_kts": max_wind, "max_gust_kts": max_gust},
+        "thresholds": {
+            "max_wind_kts": max_wind,
+            "max_gust_kts": max_gust,
+            "max_precip_mm": max_precip,
+            "min_temp_c": min_temp,
+            "max_temp_c": max_temp
+        },
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "data_source": "Environment Canada HRDPS (2.5km resolution)",
     }
@@ -256,27 +268,28 @@ def bvlos_assessment():
     # Check temperature
     temp_result = fetch_layer_wms(HRDPS_LAYERS["temperature"], lat, lon)
     if temp_result.get("status") == "success":
-        conditions["temperature_c"] = round(temp_result["value"], 1)
-        if temp_result["value"] < -20:
-            issues.append(f"Extreme cold: {temp_result['value']:.1f}°C")
+        temp_c = temp_result["value"]
+        conditions["temperature_c"] = round(temp_c, 1)
+        if temp_c < min_temp:
+            issues.append(f"Temperature {temp_c:.1f}°C below {min_temp}°C minimum")
+        elif temp_c > max_temp:
+            issues.append(f"Temperature {temp_c:.1f}°C exceeds {max_temp}°C maximum")
     
     # Check precipitation
     precip_result = fetch_layer_wms(HRDPS_LAYERS["precip_accum"], lat, lon)
     if precip_result.get("status") == "success":
         precip_mm = precip_result["value"]
         conditions["precipitation_mm"] = round(precip_mm, 2)
-        if precip_mm > 5.0:
-            issues.append(f"Heavy precipitation: {precip_mm:.1f} mm")
-        elif precip_mm > 1.0:
-            issues.append(f"Moderate precipitation: {precip_mm:.1f} mm")
+        if precip_mm > max_precip:
+            issues.append(f"Precipitation {precip_mm:.1f} mm exceeds {max_precip} mm limit")
     
     # Determine status
-    if any("exceeds" in i or "Heavy" in i or "Extreme" in i for i in issues):
+    if any("exceeds" in i or "below" in i for i in issues):
         status = "RED"
         recommendation = "NO-GO: Conditions exceed safe limits"
-    elif any("unavailable" in i or "Moderate" in i for i in issues):
+    elif any("unavailable" in i for i in issues):
         status = "YELLOW"
-        recommendation = "CAUTION: Review conditions carefully"
+        recommendation = "CAUTION: Some data unavailable"
     elif not issues:
         status = "GREEN"
         recommendation = "GO: Conditions within limits"
